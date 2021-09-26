@@ -7,4 +7,4 @@ Wasserstein VAE-GAN (with a little big adjustment, the original one cannot be us
 Learning Loss for Active Learning: https://github.com/Mephisto405/Learning-Loss-for-Active-Learning
 
 ##Uncertainty
-bceLoss with target 0
+selection_methods.py, line 115, use "Uncertainty" codes
