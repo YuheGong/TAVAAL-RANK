@@ -46,6 +46,13 @@ def vae_loss(x, recon, mu, logvar, beta):
     KLD = KLD * beta
     return MSE + KLD
 
+def vae_rank_loss(x, recon, mu, logvar, beta):
+    mse_loss = nn.MSELoss()
+    MSE = mse_loss(recon, x)
+    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+    KLD = KLD * beta
+    return MSE + KLD
+
 def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cycle):
     
     vae = models['vae']
@@ -93,6 +100,7 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
                 _,feature_u = task_model(unlabeled_imgs)
                 r_l = ranker(features_l)
                 r_u = ranker(feature_u)
+
         if iter_count == 0:
             r_l = r_l_0.detach()
             r_u = r_u_0.detach()
@@ -100,20 +108,39 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
             r_u_s = r_u_0.detach()
         else:
             r_l_s = torch.sigmoid(r_l).detach()
-            r_u_s = torch.sigmoid(r_u).detach()                 
+            r_u_s = torch.sigmoid(r_u).detach()
+
+
+
+        """ uncertainty 
+        label_uncer = get_uncertainty(models, labeled_imgs)
+        unlabel_uncer = get_uncertainty(models, labeled_imgs)
+        #label_uncer = torch.sigmoid(label_uncer).detach()
+        label_uncer.requires_grad = True
+        unlabel_uncer.requires_grad = True
+        r_l = label_uncer
+        r_u = unlabel_uncer
+        r_l.requires_grad = True
+        r_u.requires_grad = True
+        """
+
+
         # VAE step
         for count in range(num_vae_steps): # num_vae_steps
             #recon, _, mu, logvar = vae(r_l_s,labeled_imgs)
-            recon, mu, logvar = vae(labeled_imgs)
+            recon, mu, logvar = vae(r_l,labeled_imgs)
             #print("labeled_imgs",labeled_imgs.shape)
             #print("recon", recon.shape)
             unsup_loss = vae_loss(labeled_imgs, recon, mu, logvar, beta)
-            unlab_recon, unlab_mu, unlab_logvar = vae(unlabeled_imgs)
-            transductive_loss = vae_loss(unlabeled_imgs, 
+            unlab_recon, unlab_mu, unlab_logvar = vae(r_u,unlabeled_imgs)
+            transductive_loss = vae_loss(unlabeled_imgs,
                     unlab_recon, unlab_mu, unlab_logvar, beta)
+
+
+
         
-            labeled_preds = discriminator(mu)
-            unlabeled_preds = discriminator(unlab_mu)
+            labeled_preds = discriminator(r_l,mu)
+            unlabeled_preds = discriminator(r_u,unlab_mu)
             
             lab_real_preds = torch.ones(labeled_imgs.size(0))
             unlab_real_preds = torch.ones(unlabeled_imgs.size(0))
@@ -136,7 +163,7 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
             total_vae_loss = unsup_loss + transductive_loss + adversary_param * dsc_loss
             
             optimizers['vae'].zero_grad()
-            total_vae_loss.backward()
+            total_vae_loss.backward(retain_graph=True)
             optimizers['vae'].step()
 
             # sample new batch if needed to train the adversarial network
@@ -152,11 +179,11 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
         # Discriminator step
         for count in range(num_adv_steps):
             with torch.no_grad():
-                _, mu, _ = vae(labeled_imgs)
-                _, unlab_mu, _ = vae(unlabeled_imgs)
+                _, mu, _ = vae(r_l,labeled_imgs)
+                _, unlab_mu, _ = vae(r_u,unlabeled_imgs)
             
-            labeled_preds = discriminator(mu)
-            unlabeled_preds = discriminator(unlab_mu)
+            labeled_preds = discriminator(r_l,mu)
+            unlabeled_preds = discriminator(r_u,unlab_mu)
             
             lab_real_preds = torch.ones(labeled_imgs.size(0))
             unlab_fake_preds = torch.zeros(unlabeled_imgs.size(0))
@@ -164,9 +191,27 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
             with torch.cuda.device(CUDA_VISIBLE_DEVICES):
                 lab_real_preds = lab_real_preds.cuda()
                 unlab_fake_preds = unlab_fake_preds.cuda()
-            
+
+
+
+
             dsc_loss = bce_loss(labeled_preds[:,0], lab_real_preds) + \
                        bce_loss(unlabeled_preds[:,0], unlab_fake_preds)
+
+            ### use uncertatinty
+            '''
+            label_uncer = get_uncertainty(models, labeled_imgs)
+            unlabel_uncer = get_uncertainty(models, labeled_imgs)
+            label_uncer = torch.sigmoid(label_uncer).detach()
+            label_uncer.requires_grad = True
+            unlabel_uncer.requires_grad = True
+            unlabel_uncer = torch.sigmoid(unlabel_uncer).detach()
+            label_taget = torch.ones(labeled_imgs.size(0))
+            unlabel_taget = torch.ones(unlabeled_imgs.size(0))
+            dsc_loss = bce_loss(label_uncer, label_taget) + \
+                           bce_loss(unlabel_uncer, unlabel_taget)
+            '''
+            #####  Finish
 
             optimizers['discriminator'].zero_grad()
             dsc_loss.backward()
@@ -191,14 +236,12 @@ def get_uncertainty(models, unlabeled_loader):
         uncertainty = torch.tensor([]).cuda()
 
     with torch.no_grad():
-        for inputs, _, _ in unlabeled_loader:
-            with torch.cuda.device(CUDA_VISIBLE_DEVICES):
-                inputs = inputs.cuda()
-            _, features = models['backbone'](inputs)
-            pred_loss = models['module'](features) # pred_loss = criterion(scores, labels) # ground truth loss
-            pred_loss = pred_loss.view(pred_loss.size(0))
-            uncertainty = torch.cat((uncertainty, pred_loss), 0)
-    
+        with torch.cuda.device(CUDA_VISIBLE_DEVICES):
+            inputs = unlabeled_loader.cuda()
+        label, features = models['backbone'](inputs)
+        pred_loss = models['module'](features) # pred_loss = criterion(scores, labels) # ground truth loss
+        pred_loss = pred_loss.view(pred_loss.size(0))
+        uncertainty = torch.cat((uncertainty, pred_loss), 0)
     return uncertainty.cpu()
 
 def get_features(models, unlabeled_loader):

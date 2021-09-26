@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 def weights_init(m):
@@ -9,6 +10,36 @@ def weights_init(m):
     elif classname.find('BatchNorm') != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
+
+
+class Ranker:
+    def __init__(self):
+        self.a = 1
+
+    def ranker(self, rank, sigmoid):
+        ind = int(rank.shape[0] / 2)
+        rank_vor = rank[:ind]
+        rank_nach = rank[ind:]
+
+        i = rank_vor - rank_nach
+        i = i.cpu()
+        i_vor = np.int64(i > 0)
+        i_nach = np.int64(i < 0)
+        ℹ = np.concatenate((i_vor, i_nach), axis=0)
+        i = torch.from_numpy(i).float().cuda()
+        rank_vers = torch.cat((rank_nach,rank_vor),0)
+        #rank.requires_grad = True
+        #rank_vers.requires_grad = True
+        if sigmoid:
+            rank_diff = torch.sigmoid(rank - rank_vers).detach().cuda()
+        else:
+            rank_diff = torch.sigmoid(rank - rank_vers).detach().cuda()
+
+        bceloss = nn.BCELoss()
+        ranker = bceloss(rank_diff, i)
+        return ranker
+
+
 
 class Encoder(nn.Module):
     '''
@@ -58,6 +89,8 @@ class Encoder(nn.Module):
         self.n_channel = 3
         self.dim_h = 128
         self.n_z = 1
+        self.ksi = 0.1
+        self.ranker = Ranker()
 
 
         self.main = nn.Sequential(
@@ -77,10 +110,12 @@ class Encoder(nn.Module):
         self.fc_mean = nn.Linear(self.dim_h * 8, self.n_z)
         self.fc_logvar = nn.Linear(self.dim_h * 8, self.n_z)
 
-    def forward(self, x):
+    def forward(self, rank, x):
         x = self.main(x)
         x = x.squeeze()
         mean = self.fc_mean(x)
+        rank = self.ranker.ranker(rank, True).cuda()
+        mean = mean + self.ksi * rank
         logvar = self.fc_logvar(x)
         return mean, logvar
 
@@ -127,6 +162,8 @@ class Decoder(nn.Module):
         self.n_channel = 3
         self.dim_h = 128
         self.n_z = 1
+        self.ranker = Ranker()
+
 
         self.proj = nn.Sequential(
           nn.Linear(self.n_z, self.dim_h * 8 * 7 * 7),
@@ -200,6 +237,8 @@ class Discriminator(nn.Module):
         self.n_channel = 3
         self.dim_h = 128
         self.n_z = 1
+        self.ksi = 0.1
+        self.ranker = Ranker()
 
         self.main = nn.Sequential(
           nn.Linear(self.n_z, self.dim_h * 4),
@@ -214,8 +253,11 @@ class Discriminator(nn.Module):
           nn.Sigmoid()
         )
 
-    def forward(self, x):
+    def forward(self, rank, x):
         x = self.main(x)
+        rank = self.ranker.ranker(rank, False)
+        x = x + self.ksi * rank
+        #x = x + self.ksi * rank
         return x
 
 
@@ -230,7 +272,7 @@ class VAE(nn.Module):
     #self.discriminator.apply(weights_init)
 
 
-  def forward(self,x):
+  def forward(self,rank, x):
     #bs=x.size()[0]
     #print("x",x.shape)
     #z_mean=self.encoder(x)
@@ -245,7 +287,11 @@ class VAE(nn.Module):
     #print("z_logvar",z_logvar.shape)
     bs = x.size()[0]
     #vs = x.size()[1]
-    z_mean, z_logvar = self.encoder(x)
+
+
+
+
+    z_mean, z_logvar = self.encoder(rank, x)
     std = z_logvar.mul(0.5).exp_()
     #sampling epsilon from normal distribution
     from torch.autograd import Variable
@@ -258,3 +304,6 @@ class VAE(nn.Module):
       
     return x_recon, z_mean,z_logvar
     
+
+
+
