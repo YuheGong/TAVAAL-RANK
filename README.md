@@ -8,3 +8,6 @@ Learning Loss for Active Learning: https://github.com/Mephisto405/Learning-Loss-
 
 ## Uncertainty
 selection_methods.py, line 115, use "Uncertainty" codes
+
+## Excute
+python main.py -m TA-VAAL -d cifar10 -c 5

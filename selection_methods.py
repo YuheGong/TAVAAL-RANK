@@ -158,8 +158,12 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
             #print("a",a)
             labeled_preds = labeled_preds.view(-1, a[0])
             unlabeled_preds = unlabeled_preds.view(-1, b[0])
-            dsc_loss = bce_loss(labeled_preds[0], lab_real_preds) + \
+            dsc_loss_1 = bce_loss(labeled_preds[0], lab_real_preds) + \
                        bce_loss(unlabeled_preds[0], unlab_real_preds)
+            dsc_loss = torch.mean(torch.mean(-torch.log(labeled_preds)) + torch.mean(-torch.log(unlabeled_preds)))
+
+            #dsc_loss = torch.sum(-torch.log(labeled_preds)) + torch.sum(-torch.log(unlabeled_preds))
+
             total_vae_loss = unsup_loss + transductive_loss + adversary_param * dsc_loss
             
             optimizers['vae'].zero_grad()
@@ -197,6 +201,7 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
 
             dsc_loss = bce_loss(labeled_preds[:,0], lab_real_preds) + \
                        bce_loss(unlabeled_preds[:,0], unlab_fake_preds)
+            #dsc_loss =  torch.mean(torch.sum(-torch.log(labeled_preds)) + torch.sum(-torch.log(unlabeled_preds)))
 
             ### use uncertatinty
             '''
@@ -211,6 +216,8 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
             dsc_loss = bce_loss(label_uncer, label_taget) + \
                            bce_loss(unlabel_uncer, unlabel_taget)
             '''
+            #entropy = -torch.log[labeled_preds]
+            #dsc_loss = torch.sum(-torch.log(labeled_preds)) + torch.sum(-torch.log(unlabeled_preds))
             #####  Finish
 
             optimizers['discriminator'].zero_grad()
