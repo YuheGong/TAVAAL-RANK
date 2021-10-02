@@ -407,8 +407,8 @@ def query_samples(model, method, data_unlabeled, subset, labeled_set, cycle, arg
             with torch.no_grad():
                 _,features = task_model(images)
                 r = ranker(features)
-                _, mu, _ = vae(images)
-                preds = discriminator(mu)
+                _, mu, _ = vae(r, images)
+                preds = discriminator(r, mu)
 
             preds = preds.cpu().data
             all_preds.extend(preds)
