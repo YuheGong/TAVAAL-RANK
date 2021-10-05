@@ -17,6 +17,7 @@ class Ranker:
         self.a = 1
 
     def ranker(self, rank, sigmoid):
+        '''
         ind = int(rank.shape[0] / 2)
         rank_vor = rank[:ind]
         rank_nach = rank[ind:]
@@ -35,6 +36,17 @@ class Ranker:
 
         bceloss = nn.BCELoss()
         ranker = bceloss(rank_diff, i)
+        '''
+        #rank.requires_grad = True
+        ranker = torch.mean(-torch.log(rank)).detach().cuda()#+ torch.sum(-torch.log(unlabeled_preds)))
+        #torch.autograd.set_detect_anomaly(True)
+        #ranker.requires_grad = True
+        #ranker = torch.sigmoid(ranker).detach()
+        #bceloss = nn.BCELoss()
+        #ranker = bceloss(rank_diff, i)
+        ranker = torch.clamp(ranker,0, 10)
+        ranker.requires_grad = True
+
         return ranker
 
 

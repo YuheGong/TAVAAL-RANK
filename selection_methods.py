@@ -124,6 +124,12 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
         r_u.requires_grad = True
         """
 
+        ### uncertainty !!!!!!!!!!!!!!
+        r_l = torch.mean(-torch.log(r_l_0))
+        r_l.requires_grad = True
+        r_u = torch.mean(-torch.log(r_u_0))
+        r_u.requires_grad = True
+        ### FINISH
 
         # VAE step
         for count in range(num_vae_steps): # num_vae_steps
@@ -141,6 +147,12 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
         
             labeled_preds = discriminator(r_l,mu)
             unlabeled_preds = discriminator(r_u,unlab_mu)
+
+            r_l = labeled_preds
+            r_u = unlabeled_preds
+            r_l_s = torch.sigmoid(r_l).detach()
+            r_u_s = torch.sigmoid(r_u).detach()
+
             
             lab_real_preds = torch.ones(labeled_imgs.size(0))
             unlab_real_preds = torch.ones(unlabeled_imgs.size(0))
@@ -158,9 +170,9 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
             #print("a",a)
             labeled_preds = labeled_preds.view(-1, a[0])
             unlabeled_preds = unlabeled_preds.view(-1, b[0])
-            dsc_loss_1 = bce_loss(labeled_preds[0], lab_real_preds) + \
+            dsc_loss = bce_loss(labeled_preds[0], lab_real_preds) + \
                        bce_loss(unlabeled_preds[0], unlab_real_preds)
-            dsc_loss = torch.mean(torch.mean(-torch.log(labeled_preds)) + torch.mean(-torch.log(unlabeled_preds)))
+            #dsc_loss = torch.mean(torch.mean(-torch.log(labeled_preds)) + torch.mean(-torch.log(unlabeled_preds)))
 
             #dsc_loss = torch.sum(-torch.log(labeled_preds)) + torch.sum(-torch.log(unlabeled_preds))
 
@@ -196,11 +208,15 @@ def train_vaal(models, optimizers, labeled_dataloader, unlabeled_dataloader, cyc
                 lab_real_preds = lab_real_preds.cuda()
                 unlab_fake_preds = unlab_fake_preds.cuda()
 
+            #labeled_preds[:,0] = torch.clamp(labeled_preds,0, 1)
 
-
-
-            dsc_loss = bce_loss(labeled_preds[:,0], lab_real_preds) + \
-                       bce_loss(unlabeled_preds[:,0], unlab_fake_preds)
+            a = labeled_preds.shape
+            b = unlabeled_preds.shape
+            # print("a",a)
+            labeled_preds = labeled_preds.view(-1, a[0])
+            unlabeled_preds = unlabeled_preds.view(-1, b[0])
+            dsc_loss = bce_loss(labeled_preds[0], lab_real_preds) + \
+                       bce_loss(unlabeled_preds[0], unlab_real_preds)
             #dsc_loss =  torch.mean(torch.sum(-torch.log(labeled_preds)) + torch.sum(-torch.log(unlabeled_preds)))
 
             ### use uncertatinty
